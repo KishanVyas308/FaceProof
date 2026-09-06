@@ -55,24 +55,56 @@ def is_allowed_social_domain(url: str, allowed_domains: Optional[List[str]] = No
     return any(actual_domain == d or actual_domain.endswith("." + d) for d in domains)
 
 
-def upload_temp_image_for_lens(image_path: Path) -> Optional[str]:
+import io
+from PIL import Image
+
+def upload_image_to_serpapi(image_path: Path, api_key: str) -> str:
     """
-    If a local image needs a public temporary URL for Google Lens search,
-    uploads anonymously to tmpfiles.org or catbox.
-    Returns public URL or None if upload fails.
+    Uploads a local image to SerpApi's dedicated /image endpoint.
+    Automatically compresses/resizes to satisfy the < 500 KB limit.
+    Returns the SerpApi image_id.
     """
     try:
-        with open(image_path, "rb") as f:
-            resp = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                if "data" in data and "url" in data["data"]:
-                    url = data["data"]["url"]
-                    # tmpfiles.org URLs format: https://tmpfiles.org/12345/img.jpg -> https://tmpfiles.org/dl/12345/img.jpg
-                    return url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        with Image.open(image_path) as img:
+            rgb_img = img.convert("RGB")
+            # Resize if large to ensure fast upload and under 500 KB
+            rgb_img.thumbnail((1200, 1200))
+            buf = io.BytesIO()
+            quality = 85
+            rgb_img.save(buf, format="JPEG", quality=quality)
+            while len(buf.getvalue()) > 490000 and quality > 30:
+                buf = io.BytesIO()
+                quality -= 15
+                rgb_img.save(buf, format="JPEG", quality=quality)
+            image_bytes = buf.getvalue()
+    except Exception as e:
+        raise SerpApiError(f"Failed to process image for SerpApi upload: {e}")
+
+    try:
+        resp = requests.post(
+            "https://serpapi.com/image",
+            files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+            data={"api_key": api_key},
+            timeout=25
+        )
+    except requests.exceptions.RequestException as e:
+        raise SerpApiError(f"Failed to connect to SerpApi image upload endpoint: {e}")
+
+    if resp.status_code in (401, 403):
+        raise SerpApiAuthError("SerpApi authentication failed during image upload. Check your SERPAPI_KEY.")
+    elif resp.status_code != 200:
+        raise SerpApiError(f"SerpApi image upload failed with status {resp.status_code}: {resp.text[:200]}")
+
+    try:
+        upload_data = resp.json()
     except Exception:
-        pass
-    return None
+        raise SerpApiError("SerpApi image upload returned invalid response.")
+
+    image_id = upload_data.get("image_id")
+    if not image_id:
+        raise SerpApiError(f"SerpApi did not return an image_id: {upload_data}")
+
+    return image_id
 
 
 def search_google_lens(
@@ -104,28 +136,22 @@ def search_google_lens(
             "SerpApi key is not configured. Please set SERPAPI_KEY in your .env file."
         )
 
-    # Determine URL or file parameter
-    lens_url = custom_image_url
-    if not lens_url:
-        lens_url = upload_temp_image_for_lens(image_path)
-
     params = {
         "engine": "google_lens",
         "api_key": key
     }
 
-    if lens_url:
-        params["url"] = lens_url
+    if custom_image_url:
+        params["url"] = custom_image_url
+    else:
+        # Use SerpApi official /image upload endpoint
+        image_id = upload_image_to_serpapi(image_path, key)
+        params["image_id"] = image_id
 
     serpapi_endpoint = "https://serpapi.com/search.json"
 
     try:
-        # If no public URL was acquired, attempt multipart direct upload if supported or send file
-        if not lens_url:
-            with open(image_path, "rb") as f:
-                response = requests.post(serpapi_endpoint, params=params, files={"file": f}, timeout=30)
-        else:
-            response = requests.get(serpapi_endpoint, params=params, timeout=30)
+        response = requests.get(serpapi_endpoint, params=params, timeout=35)
     except requests.exceptions.RequestException as e:
         raise SerpApiError(f"Network error connecting to SerpApi: {e}")
 

@@ -1,0 +1,275 @@
+# FaceProof — Face ID + Blockchain Verification
+
+FaceProof is a tamper-evident visual verification pipeline that takes an input photo of a face, detects and encodes facial features using pretrained deep-learning models (InsightFace / ArcFace), executes a genuine reverse-image search across indexed web and social platforms via SerpApi Google Lens, retrieves candidate post images, computes high-precision cosine face similarity against an experimentally validated threshold, and registers a deterministic, privacy-preserving cryptographic fingerprint (SHA-256) of the verification record to an Ethereum Sepolia smart contract.
+
+---
+
+## Problem Statement
+
+When a photograph of an individual appears in a public social-media post or online forum, there is currently no simple, tamper-evident mechanism to record that "this face was found to visually match a specific, publicly discoverable social-media post at this exact point in time." Manual reverse-image search results and screenshots are easily forged, edited, or disputed after the fact, and there is no independent, decentralized ledger recording what was discovered, what similarity was observed, and when it occurred.
+
+## Solution Summary
+
+FaceProof solves this by bridging real-time visual reverse search with decentralized, immutable timestamping. By recording the cryptographic hash of a structured verification record to the Sepolia blockchain rather than storing raw biometric data or raw images, FaceProof guarantees mathematical tamper-evidence without violating user privacy or creating permanent on-chain biometric footprints. Anyone holding the local verification record can recompute its SHA-256 digest and verify it against the public Ethereum blockchain.
+
+---
+
+## Architecture
+
+```
+[ Input Photo / Camera Frame ]
+            │
+            ▼
+┌───────────────────────────────────────────────┐
+│ Layer 1: Input / Camera Validation            │
+│  - PIL Header Verification & Staging          │
+│  - Compute Input SHA-256                      │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 2: Face Detection & Encoding            │
+│  - Pretrained InsightFace (buffalo_l/ArcFace) │
+│  - Extract 512-d L2-Normalized Embedding      │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 3: Genuine Reverse Image Search         │
+│  - SerpApi Google Lens Engine                 │
+│  - Live visual match discovery                │
+│  - Filter to social media allowlist           │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 4: Candidate Image Retrieval            │
+│  - Direct image & thumbnail download          │
+│  - Fallback handling (inaccessible / walls)   │
+│  - Compute Candidate SHA-256                  │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 5: Face Matching & Similarity           │
+│  - Candidate face detection & embedding       │
+│  - Cosine similarity: dot(A, B) / (||A||*||B||)│
+│  - Decision vs MATCH_THRESHOLD (0.45)         │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 6: Verification Record Hashing          │
+│  - Canonical deterministic JSON serialization │
+│  - Compute 32-byte SHA-256 fingerprint        │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│ Layer 7: Blockchain Registry (Sepolia)        │
+│  - Submit recordHash to VerificationRegistry  │
+│  - Immutable transaction receipt on-chain     │
+└───────────────────────────────────────────────┘
+```
+
+---
+
+## Full Pipeline Description (14-Step Execution Flow)
+
+During execution, FaceProof outputs a step-by-step progress trace printed immediately in real time:
+
+1. `[1/14]` **Input image loaded**: Validates image headers, stages working file to `./tmp/run_<timestamp>/input.jpg`, and computes its SHA-256 checksum.
+2. `[2/14]` **Face detected**: Detects faces with RetinaFace / SCRFD; enforces zero-face and multi-face policies (selects primary subject with largest bounding box).
+3. `[3/14]` **Face embedding generated**: Extracts 512-dimensional ArcFace vector and applies L2 normalization.
+4. `[4/14]` **Running reverse image search**: Submits image to SerpApi's Google Lens engine for genuine visual search.
+5. `[5/14]` **Candidate found**: Filters visual matches against allowed social-media platforms (Instagram, X/Twitter, Facebook, LinkedIn, Reddit, TikTok, etc.).
+6. `[6/14]` **Candidate image retrieved**: Downloads candidate image / thumbnail with automated fallback to next candidates if links are expired or behind access walls.
+7. `[7/14]` **Candidate face detected**: Runs detection on candidate image; supports multi-face candidate posts.
+8. `[8/14]` **Similarity computed**: Calculates cosine similarity against candidate face embeddings and picks maximum score.
+9. `[9/14]` **Decision**: Compares score against `MATCH_THRESHOLD` (0.45) to determine MATCH or NO MATCH.
+10. `[10/14]` **Verification record built**: Constructs structured metadata JSON excluding sensitive raw biometrics.
+11. `[11/14]` **Record hash**: Deterministically serializes record (sorted keys, compact separators) and computes SHA-256 digest.
+12. `[12/14]` **Submitting transaction to Sepolia**: Builds, signs, and broadcasts transaction to `VerificationRegistry` contract.
+13. `[13/14]` **Transaction confirmed**: Awaits on-chain confirmation receipt on Ethereum Sepolia testnet.
+14. `[14/14]` **Verification complete**: Formats direct Sepolia Etherscan transaction link for independent verification.
+
+---
+
+## Tech Stack
+
+- **Machine Learning / Vision**: InsightFace (`buffalo_l` pretrained pack), ONNX Runtime, OpenCV, Pillow, NumPy
+- **Reverse Image Search**: SerpApi (Google Lens Engine API)
+- **Smart Contract**: Solidity (`^0.8.20`), Remix IDE, MetaMask
+- **Blockchain Network**: Ethereum Sepolia Testnet
+- **Web3 Integration**: `web3.py` (v6/v8), `eth-account`
+- **Testing & Environment**: `pytest`, `python-dotenv`, `uv`
+
+---
+
+## Setup Instructions
+
+### 1. Prerequisites
+- Python 3.10, 3.11, or 3.12 (Python 3.11 recommended)
+- `uv` (recommended) or standard `pip`
+- A SerpApi account and API key from [serpapi.com](https://serpapi.com)
+- An Ethereum Sepolia RPC endpoint (from [Alchemy](https://alchemy.com) or [Infura](https://infura.io))
+- A dedicated testnet-only wallet holding Sepolia test ETH (obtain free from [sepoliafaucet.com](https://sepoliafaucet.com))
+
+### 2. Environment Configuration
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Configure your environment keys in `.env`:
+```ini
+SERPAPI_KEY=your_live_serpapi_key
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+WALLET_PRIVATE_KEY=0xyour_dedicated_testnet_private_key
+CONTRACT_ADDRESS=0xyour_deployed_verification_registry_address
+SIMULATE_BLOCKCHAIN=false
+```
+
+### 3. Installation
+Using `uv`:
+```bash
+uv venv --python 3.11 .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+Or using standard `pip`:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
+## How to Run
+
+### Standard File Verification
+```bash
+python main.py --image path/to/your_photo.jpg
+```
+
+### Webcam Capture Mode
+```bash
+python main.py --webcam
+```
+
+### Dry Run / Offline Simulation Mode
+If running without live Sepolia testnet gas or evaluating offline:
+```bash
+python main.py --image path/to/your_photo.jpg --simulate
+```
+
+### Look Up an Existing Transaction on Sepolia
+```bash
+python main.py --lookup 0xYOUR_TRANSACTION_HASH
+```
+
+---
+
+## Example CLI Output
+
+```
+[1/14] Input image loaded: input.jpg (sha256: a1b2c3d4e5f6...)
+[2/14] Face detected: 1 face, det_score=0.98
+[3/14] Face embedding generated (512-d)
+[4/14] Running reverse image search via SerpApi (Google Lens)...
+[5/14] Candidate found: https://www.instagram.com/p/example/ (domain: instagram.com)
+[6/14] Candidate image retrieved (sha256: d4e5f6a1b2c3...)
+[7/14] Candidate face detected: 1 face
+[8/14] Similarity computed: 0.71
+[9/14] Decision: MATCH (threshold=0.45)
+[10/14] Verification record built (verification_record.json)
+[11/14] Record hash: 7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e
+[12/14] Submitting transaction to Sepolia...
+[13/14] Transaction confirmed: 0xabc123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd
+[14/14] Verification complete. View: https://sepolia.etherscan.io/tx/0xabc123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd
+
+=================================================================
+                 FACEPROOF VERIFICATION SUCCESS                  
+=================================================================
+ Pipeline Version        : 0.1.0
+ Run Directory           : /path/to/FaceProof-GOA/tmp/run_1725660000000
+ Input SHA-256           : a1b2c3d4e5f6...
+ Candidate URL           : https://www.instagram.com/p/example/
+ Candidate SHA-256       : d4e5f6a1b2c3...
+ Similarity Score        : 0.71
+ Match Decision          : MATCH
+ Record Hash             : 7f8e9d0a1b2c...
+ Sepolia Tx Hash         : 0xabc123456...
+ Explorer URL            : https://sepolia.etherscan.io/tx/0xabc123...
+=================================================================
+```
+
+---
+
+## Smart Contract Details
+
+- **Contract Name**: `VerificationRegistry`
+- **Source Code**: [`contracts/VerificationRegistry.sol`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/contracts/VerificationRegistry.sol)
+- **Target Network**: Ethereum Sepolia Testnet (Chain ID: 11155111)
+- **Functions**:
+  - `submitVerification(bytes32 recordHash, string calldata metadata)`: Appends record hash, sender address, and block timestamp; emits `VerificationSubmitted`.
+  - `getVerificationCount()`: Returns total number of registered records.
+  - `getVerification(uint256 id)`: Returns record details for a given record ID.
+  - `getVerificationIdsByHash(bytes32 recordHash)`: Returns record IDs for a matching record hash.
+
+---
+
+## Blockchain Storage: Why Hashes, Not Raw Data
+
+Storing raw biometric vectors (embeddings) or full-resolution photos on an immutable public ledger is a severe privacy violation and creates permanent, unrevocable surveillance risks. 
+
+FaceProof implements **cryptographic proof-of-existence**:
+1. All biometric calculations and face embeddings remain strictly in transient local memory.
+2. The verification record contains only non-sensitive metadata (`input_image_sha256`, `candidate_image_sha256`, `candidate_source_url`, `similarity_score`, `match_status`, `timestamp`).
+3. Only the **SHA-256 hash** of this canonical JSON is written to the blockchain.
+4. Anyone possessing the verification JSON record can independently calculate its SHA-256 hash and verify that it matches the on-chain hash recorded at that block timestamp.
+
+---
+
+## Known Limitations
+
+1. **Face Recognition Model Variance**:
+   - Extreme angles, low lighting, heavy occlusion (sunglasses, masks), or significant age gaps reduce cosine similarity.
+   - `MATCH_THRESHOLD = 0.45` is an experimentally chosen prototype parameter; it is not a forensic or legal standard.
+2. **Reverse Image Search Indexing & Rate Limits**:
+   - Google Lens coverage depends on public web crawlers. Private accounts, ephemeral stories, and recent unindexed uploads will not return candidates.
+   - Public figures and widely shared images surface readily; private individuals' newly taken photos typically return no visual matches.
+   - SerpApi free tier has monthly query quotas.
+3. **Platform Access Controls**:
+   - Platforms that restrict automated downloads or require login walls may prevent downloading full-resolution candidate media; FaceProof uses thumbnail fallback and gracefully records `candidate_unavailable` if all sources are blocked.
+
+---
+
+## Privacy Considerations
+
+- **No KYC / Identity Claims**: FaceProof tests visual and embedding similarity between two photos. It does **not** identify real-world legal identities.
+- **Credential Hygiene**: `.env` is gitignored. Private keys and API keys are never printed to console, written to logs, or committed to git.
+- **Dedicated Testnet Wallet**: Only testnet wallets with zero mainnet funds should ever be used.
+
+---
+
+## Future Improvements
+
+- Multi-candidate ranking aggregation (comparing against top 5 matches instead of top 1).
+- ZK-proofs (Zero-Knowledge proofs) of facial similarity to verify matching on-chain without revealing candidate URLs.
+- Decentralized storage integration (IPFS / Filecoin) for decentralized verification record hosting.
+
+---
+
+## Hackathon Task Mapping Table
+
+| Requirement | Implementation Component | File Reference | Pipeline Step |
+|---|---|---|---|
+| **Detect and encode a face** | RetinaFace / ArcFace L2-normalized 512-d embeddings | [`face/encoder.py`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/face/encoder.py) | Steps `[2/14]`, `[3/14]` |
+| **Find real matching post via genuine reverse-image search** | SerpApi Google Lens live visual match API call | [`reverse_search/serpapi_client.py`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/reverse_search/serpapi_client.py) | Steps `[4/14]`, `[5/14]` |
+| **Upload match data to blockchain** | Deterministic JSON hashing + Web3 Sepolia contract submission | [`verification/record.py`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/verification/record.py) & [`blockchain/client.py`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/blockchain/client.py) | Steps `[10/14]` – `[14/14]` |
+| **No website or hosting needed** | Pure CLI application | [`main.py`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/main.py) | End-to-end CLI |
+| **Source on GitHub** | Clean structure, gitignored secrets, setup docs | Repository root | Entire codebase |
+| **How to run** | Setup instructions, arguments, dry-run flags | [`README.md`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/README.md) | Setup & Run sections |
+| **Blockchain used + limitations** | Sepolia testnet details, gas considerations, privacy & model limits | [`README.md`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/README.md) | Contract & Limitations sections |
+| **Unedited end-to-end screen recording** | Step-by-step recording guide & checklist | [`DEMO_SCRIPT.md`](file:///Users/kishan/All-Project/Projects/FaceProof-GOA/DEMO_SCRIPT.md) | Recording script |

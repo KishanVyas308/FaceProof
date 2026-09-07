@@ -110,8 +110,7 @@ def upload_image_to_serpapi(image_path: Path, api_key: str) -> str:
 def search_google_lens(
     image_path: Path,
     api_key: Optional[str] = None,
-    custom_image_url: Optional[str] = None,
-    allow_demo_fallback: bool = False
+    custom_image_url: Optional[str] = None
 ) -> List[SearchCandidate]:
     """
     Performs a genuine reverse image search using SerpApi Google Lens engine.
@@ -120,18 +119,6 @@ def search_google_lens(
     """
     key = api_key or SERPAPI_KEY
     if not key or key == "your_serpapi_key_here":
-        if allow_demo_fallback:
-            # Demo mode fallback for offline evaluation / automated tests
-            return [
-                SearchCandidate(
-                    title="Sample Public Post on Instagram",
-                    source_url="https://www.instagram.com/p/sample_demo_post_2026/",
-                    domain="instagram.com",
-                    thumbnail_url=None,
-                    direct_image_url=None,
-                    rank=1
-                )
-            ]
         raise SerpApiAuthError(
             "SerpApi key is not configured. Please set SERPAPI_KEY in your .env file."
         )

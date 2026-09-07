@@ -171,7 +171,8 @@ class SepoliaClient:
             signed_tx = self.w3.eth.account.sign_transaction(tx_data, private_key=self.private_key)
 
             # Broadcast transaction
-            raw_tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            raw_tx_bytes = getattr(signed_tx, "raw_transaction", None) or getattr(signed_tx, "rawTransaction", None)
+            raw_tx_hash = self.w3.eth.send_raw_transaction(raw_tx_bytes)
             tx_hash = raw_tx_hash.hex()
             if not tx_hash.startswith("0x"):
                 tx_hash = f"0x{tx_hash}"
@@ -210,14 +211,39 @@ class SepoliaClient:
         try:
             tx = self.w3.eth.get_transaction(tx_hash_hex)
             receipt = self.w3.eth.get_transaction_receipt(tx_hash_hex)
-            return {
-                "tx_hash": tx_hash_hex,
-                "from": tx["from"],
-                "to": tx["to"],
-                "block_number": receipt["blockNumber"],
-                "status": "Confirmed (Success)" if receipt["status"] == 1 else "Reverted",
-                "gas_used": receipt["gasUsed"],
-                "explorer_url": f"{SEPOLIA_EXPLORER_TX_URL}{tx_hash_hex}"
+
+            result = {
+                "Tx Hash": tx_hash_hex,
+                "Status": "Confirmed (Success)" if receipt["status"] == 1 else "Reverted",
+                "Block Number": receipt["blockNumber"],
+                "From": tx["from"],
+                "Contract (To)": tx["to"],
+                "Gas Used": receipt["gasUsed"],
+                "Explorer URL": f"{SEPOLIA_EXPLORER_TX_URL}{tx_hash_hex}"
             }
+
+            # Attempt to decode VerificationSubmitted event logs from the contract
+            try:
+                checksum_address = Web3.to_checksum_address(self.contract_address)
+                contract = self.w3.eth.contract(address=checksum_address, abi=self.abi)
+                events = contract.events.VerificationSubmitted().process_receipt(receipt)
+                if events:
+                    event_args = events[0]["args"]
+                    entry_id = event_args.get("id")
+                    rec_hash = event_args.get("recordHash")
+                    rec_hash_hex = "0x" + rec_hash.hex() if isinstance(rec_hash, bytes) else str(rec_hash)
+                    result["Registry Entry ID"] = entry_id
+                    result["On-Chain Record Hash"] = rec_hash_hex
+
+                    # Retrieve full entry details from contract storage
+                    if entry_id is not None:
+                        entry_details = contract.functions.getVerification(entry_id).call()
+                        result["On-Chain Metadata"] = entry_details[1]
+                        result["Block Timestamp (Unix)"] = entry_details[2]
+            except Exception:
+                # If event decoding is not applicable, return basic receipt
+                pass
+
+            return result
         except Exception as e:
             raise BlockchainError(f"Could not retrieve transaction {tx_hash_hex}: {e}")

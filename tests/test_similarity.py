@@ -41,3 +41,24 @@ def test_compare_faces_no_face_in_candidate(tmp_path):
     assert result.similarity_score is None
     assert result.candidate_face_count == 0
     assert "No face detected" in result.decision_reason
+
+
+def test_compute_match_confidence():
+    from matching.similarity import compute_match_confidence
+
+    assert compute_match_confidence(None) is None
+    assert compute_match_confidence(-0.5) == 0.0
+    assert compute_match_confidence(0.0) == 0.0
+
+    # At threshold (0.45), confidence should calibrate to 75.0%
+    assert compute_match_confidence(0.45, threshold=0.45) == 75.0
+
+    # Below threshold (0.225), confidence should be 37.5%
+    assert compute_match_confidence(0.225, threshold=0.45) == 37.5
+
+    # Above threshold (0.65), confidence should be > 80%
+    assert compute_match_confidence(0.65, threshold=0.45) > 80.0
+
+    # Near-identical (0.85+), confidence should be 100.0%
+    assert compute_match_confidence(0.90, threshold=0.45) == 100.0
+

@@ -75,7 +75,8 @@ def deploy():
     signed_tx = w3.eth.account.sign_transaction(tx_data, private_key=WALLET_PRIVATE_KEY)
 
     print("Broadcasting transaction to Ethereum Sepolia...")
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+    raw_tx_bytes = getattr(signed_tx, "raw_transaction", None) or getattr(signed_tx, "rawTransaction", None)
+    tx_hash = w3.eth.send_raw_transaction(raw_tx_bytes)
     tx_hash_hex = tx_hash.hex()
     if not tx_hash_hex.startswith("0x"):
         tx_hash_hex = f"0x{tx_hash_hex}"
@@ -112,7 +113,7 @@ def deploy():
         print("Updated .env with CONTRACT_ADDRESS.")
 
     print("\nDeployment complete! You can now run:")
-    print("python main.py --image image.png")
+    print("python main.py --image path/to/your_photo.jpg")
 
 
 if __name__ == "__main__":

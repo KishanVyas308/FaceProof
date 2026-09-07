@@ -20,6 +20,7 @@ from face.encoder import encode_face, FaceEncodingResult, NoFaceDetectedError
 class SimilarityResult:
     """Represents the outcome of face similarity comparison."""
     similarity_score: Optional[float]
+    confidence_percent: Optional[float]
     is_match: bool
     candidate_face_count: int
     decision_reason: str
@@ -36,6 +37,32 @@ def compute_cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
         return 0.0
     sim = float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
     return float(np.clip(sim, -1.0, 1.0))
+
+
+def compute_match_confidence(
+    cosine_sim: Optional[float],
+    threshold: float = MATCH_THRESHOLD
+) -> Optional[float]:
+    """
+    Calibrates a raw ArcFace 512-d cosine similarity (-1.0 to 1.0) into a
+    human-interpretable Match Confidence Percentage (0.0% to 100.0%).
+
+    Calibration curve:
+    - Cosine <= 0.0: No correlation / opposite faces (0.0%)
+    - Cosine in [0.0, threshold): Scales smoothly from 0.0% to 74.9% (Non-match)
+    - Cosine == threshold: 75.0% confidence (Decision threshold)
+    - Cosine in [threshold, 0.85]: Scales smoothly from 75.0% to 100.0% (Verified match)
+    - Cosine > 0.85: 100.0% confidence
+    """
+    if cosine_sim is None:
+        return None
+    if cosine_sim <= 0.0:
+        return 0.0
+    if cosine_sim < threshold:
+        return round((cosine_sim / threshold) * 75.0, 1)
+
+    scaled = 75.0 + ((cosine_sim - threshold) / (0.85 - threshold)) * 25.0
+    return round(min(100.0, max(75.0, scaled)), 1)
 
 
 def compare_faces(
@@ -57,6 +84,7 @@ def compare_faces(
     except Exception as e:
         return SimilarityResult(
             similarity_score=None,
+            confidence_percent=None,
             is_match=False,
             candidate_face_count=0,
             decision_reason=f"Candidate face detection error: {e}"
@@ -65,6 +93,7 @@ def compare_faces(
     if cand_result.face_count == 0:
         return SimilarityResult(
             similarity_score=None,
+            confidence_percent=None,
             is_match=False,
             candidate_face_count=0,
             decision_reason="No face detected in candidate image"
@@ -79,16 +108,18 @@ def compare_faces(
 
     max_score = float(max(scores))
     max_score = round(max_score, 4)
+    confidence = compute_match_confidence(max_score, threshold=threshold)
     is_match = max_score >= threshold
 
     reason = (
-        f"Similarity {max_score:.2f} >= threshold {threshold:.2f} (faces compared: {len(scores)})"
+        f"Similarity {max_score:.2f} ({confidence}%) >= threshold {threshold:.2f} (faces compared: {len(scores)})"
         if is_match
-        else f"Similarity {max_score:.2f} < threshold {threshold:.2f} (faces compared: {len(scores)})"
+        else f"Similarity {max_score:.2f} ({confidence}%) < threshold {threshold:.2f} (faces compared: {len(scores)})"
     )
 
     return SimilarityResult(
         similarity_score=max_score,
+        confidence_percent=confidence,
         is_match=is_match,
         candidate_face_count=cand_result.face_count,
         decision_reason=reason

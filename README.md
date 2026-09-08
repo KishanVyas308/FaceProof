@@ -6,7 +6,7 @@ FaceProof is an end-to-end visual verification pipeline that detects and encodes
 
 ## Demonstration Video
 
-**[Watch the full end-to-end continuous run on YouTube](https://youtu.be/demo-video-link-placeholder)**
+**[Watch the full end-to-end continuous run on YouTube](https://www.youtube.com/watch?v=XJHLRdgfsws)**
 
 ---
 
